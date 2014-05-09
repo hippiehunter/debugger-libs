@@ -46,6 +46,7 @@ namespace Mono.Debugging.Client
 	
 	public abstract class DebuggerSession: IDisposable
 	{
+		static public GetExpressionEvaluatorHandler GlobalGetExpressionEvaluator;
 		readonly Dictionary<BreakEvent, BreakEventInfo> breakpoints = new Dictionary<BreakEvent, BreakEventInfo> ();
 		readonly Dictionary<string, string> resolvedExpressionCache = new Dictionary<string, string> ();
 		readonly InternalDebuggerSession frontend;
@@ -910,14 +911,11 @@ namespace Mono.Debugging.Client
 		}
 		
 		readonly Mono.Debugging.Evaluation.ExpressionEvaluator defaultResolver = new Mono.Debugging.Evaluation.NRefactoryExpressionEvaluator ();
-		readonly Dictionary <string, IExpressionEvaluator> evaluators = new Dictionary <string, IExpressionEvaluator> ();
+		readonly Dictionary<string, IExpressionEvaluator> evaluators = new Dictionary<string, IExpressionEvaluator>();
 
-		internal IExpressionEvaluator FindExpressionEvaluator (StackFrame frame)
+		internal IExpressionEvaluator FindExpressionEvaluator (SourceLocation location)
 		{
-			if (GetExpressionEvaluator == null)
-				return null;
-
-			string fn = frame.SourceLocation == null ? null : frame.SourceLocation.FileName;
+			string fn = location == null ? null : location.FileName;
 			if (String.IsNullOrEmpty (fn))
 				return null;
 
@@ -926,19 +924,33 @@ namespace Mono.Debugging.Client
 			if (evaluators.TryGetValue (fn, out result))
 				return result;
 
-			result = GetExpressionEvaluator(fn);
+			if (GlobalGetExpressionEvaluator != null)
+				result = GlobalGetExpressionEvaluator(fn);
+
+			if (result == null && GetExpressionEvaluator != null)
+				result = GetExpressionEvaluator(fn);
 
 			evaluators[fn] = result;
 
 			return result;
 		}
 
-		public Mono.Debugging.Evaluation.ExpressionEvaluator GetEvaluator (StackFrame frame)
+		public Mono.Debugging.Evaluation.ExpressionEvaluator GetEvaluator (SourceLocation location)
 		{
-			IExpressionEvaluator result = FindExpressionEvaluator (frame);
+			IExpressionEvaluator result = FindExpressionEvaluator(location);
 			if (result == null)
 				return defaultResolver;
 			return result.Evaluator;
+		}
+
+		internal IExpressionEvaluator FindExpressionEvaluator (StackFrame frame)
+		{
+			return FindExpressionEvaluator(frame.SourceLocation);
+		}
+
+		public Mono.Debugging.Evaluation.ExpressionEvaluator GetEvaluator (StackFrame frame)
+		{
+			return GetEvaluator(frame.SourceLocation);
 		}
 		
 		
@@ -956,7 +968,7 @@ namespace Mono.Debugging.Client
 		/// </returns>
 		protected virtual string OnResolveExpression (string expression, SourceLocation location)
 		{
-			return defaultResolver.Resolve (this, location, expression);
+			return GetEvaluator(location).Resolve(this, location, expression);
 		}
 		
 		internal protected string ResolveIdentifierAsType (string identifier, SourceLocation location)
